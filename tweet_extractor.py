@@ -2,9 +2,10 @@ import tweepy
 import configparser
 from tweepy.error import TweepError
 import os.path
+import csv
+
 
 class TweetExtractor:
-    
     def __init__(self):
         self.config = configparser.ConfigParser()
         self.config.read('config.ini')
@@ -12,15 +13,16 @@ class TweetExtractor:
         self.consumer_secret = self.config['DEFAULT']['consumer_secret']
         self.access_token = self.config['DEFAULT']['access_token']
         self.access_token_secret = self.config['DEFAULT']['access_token_secret']
-        self.cache_filename = os.path.dirname(self.config['DEFAULT']['cache_file'])
+        self.cache_filename = self.config['DEFAULT']['cache_filename']
         self.headers = self.config['DEFAULT']['headers'].split()
+        auth = tweepy.OAuthHandler(self.consumer_key, self.consumer_secret)
+        self.api = tweepy.API(auth)
         self.tweet_ids = self.load()
         self.output_filename = self.config['DEFAULT']['output_filename']
+        self.error_filename = self.config['DEFAULT']['error_filename']
         self.__extract__()
 
     def load(self):
-        auth = tweepy.OAuthHandler(self.consumer_key, self.consumer_secret)
-        self.api = tweepy.API(auth)
         with open(self.config['DEFAULT']['ids_filename'], 'r') as f:
             data = f.read()
         return data
@@ -33,7 +35,6 @@ class TweetExtractor:
             return None
 
     def __update_csv_file__(self, data):
-        import csv
         has_header = False
         if os.path.exists(self.output_filename):
             has_header = True
@@ -42,9 +43,21 @@ class TweetExtractor:
             if not has_header:
                 writer.writerow(self.headers)
             writer.writerow(data)
+        with open(self.cache_filename, 'w') as f:
+            f.write(str(data[0]))
+
+    def __update_error_record__(self, tweet_id, error_message):
+        is_exists = False
+        if os.path.exists(self.error_filename):
+            is_exists = True
+        with open(self.error_filename, 'a') as f:
+            writer = csv.writer(f, delimiter=',')
+            if not is_exists:
+                writer.writerow(['Tweet ID',
+                                 'Error Message'])
+            writer.writerow([tweet_id, error_message])
 
     def __extract__(self):
-
         last_id = None
         if os.path.exists(self.cache_filename):
             with open(self.cache_filename, 'r') as cache_file:
@@ -54,7 +67,9 @@ class TweetExtractor:
             if flag or last_id is None:
                 try:
                     tweet = self.api.get_status(each)
-                except TweepError:
+                except TweepError as e:
+                    self.__update_error_record__(tweet_id=each,
+                                                 error_message=e.reason)
                     tweet = None
                 if tweet is not None:
                     each_tweet = tweet._json
